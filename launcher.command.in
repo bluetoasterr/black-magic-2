@@ -1,0 +1,42 @@
+#!/bin/zsh
+set -euo pipefail
+
+if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
+  echo "ur not supported"
+  read -r '?Press Return to close...'
+  exit 1
+fi
+
+payload_line=$(awk '/^__KAIHEN_PAYLOAD_BELOW__$/ {print NR + 1; exit}' "$0")
+if [[ -z "$payload_line" ]]; then
+  echo "the payload isnt there"
+  read -r '?Press Return to close...'
+  exit 1
+fi
+
+launch_dir=$(mktemp -d "${TMPDIR:-/tmp}/kaihen-launch.XXXXXX")
+trap 'rm -rf "$launch_dir"' EXIT
+tail -n +"$payload_line" "$0" | base64 -D | tar -xz -C "$launch_dir"
+
+read -r 'switch_address?enter the switch ip: '
+if ! switch_ip=$("$launch_dir/bin/node" -e '
+  const net = require("node:net");
+  const match = /^(\d+\.\d+\.\d+\.\d+)(?::(\d+))?$/.exec(process.argv[1].trim());
+  if (!match || net.isIP(match[1]) !== 4 ||
+      (match[2] && match[2] !== "9026")) process.exit(1);
+  process.stdout.write(match[1]);
+' "$switch_address"); then
+  echo "enter the switch ip"
+  read -r '?Press Return to close...'
+  exit 1
+fi
+
+cd "$launch_dir/app"
+if "$launch_dir/bin/node" tools/start-kaihen.mjs "$switch_ip"; then
+  result=0
+else
+  result=$?
+fi
+read -r '?Press Return to close...'
+exit "$result"
+__KAIHEN_PAYLOAD_BELOW__
